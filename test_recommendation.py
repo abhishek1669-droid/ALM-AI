@@ -11,6 +11,7 @@ from engine.liability import prepare_liability_cashflows
 from engine.dcr import calculate_dcr
 from engine.krd import calculate_bond_krd
 from engine.recommendation import generate_recommendations
+from conversation_state import conversation_state
 
 client = genai.Client(
     api_key=os.getenv("GEMINI_API_KEY")
@@ -23,7 +24,7 @@ def run_recommendation(curve_name):
         "current": "Current Valuation",
         "today": "Today",
         "yesterday": "Yesterday",
-        "day_before_yesterday": "Day Before Yesterday"
+        "day before yesterday": "Day Before Yesterday"
     }
 
     selected_curve = curve_map[curve_name]
@@ -94,9 +95,45 @@ def run_recommendation(curve_name):
     return recommendation_df, rejected_df, message
 
 
+
 def explain_recommendation(curve_name,user_query):
 
     recommendation_df, rejected_df, message = run_recommendation(curve_name)
+    # ----------------------------
+    # Update conversation memory
+    # ----------------------------
+
+    conversation_state["last_tool"] = "recommendation"
+    conversation_state["last_curve"] = curve_name
+
+    conversation_state["last_recommendation_df"] = recommendation_df
+    conversation_state["last_rejected_df"] = rejected_df
+
+    if len(recommendation_df) > 0:
+
+        top = recommendation_df.iloc[0]
+
+        conversation_state["recommendation_summary"] = {
+
+            "Sell Bond": top["Sell Bond"],
+
+            "Buy Bond": top["Buy Bond"],
+
+            "Expected Gain": top["Expected Gain"],
+
+            "Deviation Improvement": top["Deviation Improvement"]
+
+        }
+
+    else:
+
+        conversation_state["recommendation_summary"] = None
+
+    if len(recommendation_df) > 0:
+
+        conversation_state["last_sell_bond"] = recommendation_df.iloc[0]["Sell Bond"]
+
+        conversation_state["last_buy_bond"] = recommendation_df.iloc[0]["Buy Bond"]
 
     if recommendation_df.empty and rejected_df.empty:
 
@@ -134,7 +171,22 @@ def explain_recommendation(curve_name,user_query):
         contents=prompt
     )
 
-    return response.text
+    return {
+
+        "response": response.text,
+
+        "recommendation_df": recommendation_df,
+
+        "rejected_df": rejected_df,
+
+        "summary": conversation_state["recommendation_summary"],
+
+        "curve": curve_name,
+
+        "follow_up": False
+
+    }
+
 
 
 def identify_tool(user_query):
@@ -186,11 +238,34 @@ def identify_tool(user_query):
 
     Rules:
 
-    1. If the user mentions today's → return "today".
-    2. If the user mentions yesterday's → return "yesterday".
-    3. If the user mentions day before yesterday's → return "day before yesterday".
-    4. If no curve is mentioned, return "today".
-    5. Do not invent any other curve names.
+    1. If the user mentions "today" or "today's", return "today".
+    2. If the user mentions "yesterday" or "yesterday's", return "yesterday".
+    3. If the user mentions "day before yesterday" or "day before yesterday's", return "day before yesterday".
+    4. If no curve is mentioned, return an empty string "".
+    5. If the user is asking about a previous recommendation
+    (for example: "show sell bond", "buy bond details",
+    "why this strategy", "show details", "its KRD"),
+    still return tool = "recommendation".
+    6. Do not invent any other curve names.
+
+    If the user is asking about the previous answer, for example:
+
+    - Which bond should I sell?
+    - Which bond should I buy?
+    - Show sell bond.
+    - Show buy bond.
+    - Why was this selected?
+    - Explain this recommendation.
+    - Show rejected strategies.
+    - Show details.
+
+    then set
+
+    "follow_up": true
+
+    Otherwise
+
+    "follow_up": false
 
     Return ONLY valid JSON.
 
@@ -198,7 +273,8 @@ def identify_tool(user_query):
 
     {{
         "tool": "recommendation",
-        "curve": "today"
+        "curve": "today",
+        "follow_up": false
     }}
 
     User Question:
@@ -214,31 +290,201 @@ def identify_tool(user_query):
     return json.loads(response.text)
 
 
+def dataframe_to_text(df):
+
+    if df is None or len(df) == 0:
+        return "No data available."
+
+    rows = []
+
+    for _, row in df.iterrows():
+
+        row_text = []
+
+        for column in df.columns:
+            row_text.append(f"{column}: {row[column]}")
+
+        rows.append(" | ".join(row_text))
+
+    return "\n".join(rows)
+
+
+def explain_followup(user_query):
+
+    recommendation_df = conversation_state["last_recommendation_df"]
+    rejected_df = conversation_state["last_rejected_df"]
+
+    if recommendation_df is None:
+        return "No previous recommendation available."
+
+    curve = conversation_state["last_curve"]
+
+    summary = conversation_state["recommendation_summary"]
+    
+    recommended_text = dataframe_to_text(recommendation_df)
+    rejected_text = dataframe_to_text(rejected_df)
+
+    prompt = f"""
+    You are Arjuna AI.
+
+    The user is asking a follow-up question regarding the PREVIOUS recommendation.
+
+    The recommendation engine has ALREADY been executed.
+
+    Do NOT generate a fresh recommendation.
+
+    Use ONLY the information below.
+
+    ====================================================
+
+    Yield Curve Used
+
+    {curve}
+
+    ====================================================
+    
+    Recommendation Summary
+
+    {summary}
+
+    ====================================================
+
+    All Recommended Strategies
+
+    {recommended_text}
+
+    ====================================================
+
+    Rejected Strategies
+
+    {rejected_text}
+
+    ====================================================
+
+    User Question
+
+    {user_query}
+
+    ====================================================
+
+    Instructions
+
+    1. Answer ONLY using the stored recommendation.
+
+    2. If the answer exists in the recommendation,
+    answer directly.
+
+    3. If the user asks why a strategy was rejected,
+    use the rejected strategies.
+
+    4. Never generate a fresh recommendation.
+
+    5. Never assume values that are not available.
+
+    6. If the requested information is unavailable,
+    state that politely.
+    """
+
+    response = client.models.generate_content(
+        model="gemini-3.1-flash-lite",
+        contents=prompt
+    )
+
+    return {
+
+        "response": response.text,
+
+        "recommendation_df": conversation_state["last_recommendation_df"],
+
+        "rejected_df": conversation_state["last_rejected_df"],
+
+        "summary": conversation_state["recommendation_summary"],
+
+        "curve": conversation_state["last_curve"],
+
+        "follow_up": True
+
+    }
+
+
 def ask_arjuna(user_query):
 
     intent = identify_tool(user_query)
 
     tool = intent["tool"]
-
     curve = intent["curve"]
+    follow_up = intent["follow_up"]
+
+    if curve == "":
+        curve = conversation_state["last_curve"]
 
     print(f"Tool Selected: {tool}")
 
     if tool == "recommendation":
 
-        return explain_recommendation(curve, user_query)
+        if follow_up:
+
+            return explain_followup(user_query)
+
+        else:
+
+            return explain_recommendation(curve, user_query)
 
     elif tool == "pricing":
+        
+        return {
 
-        return "Pricing tool not yet connected."
+            "response": "Pricing tool not yet connected.",
+
+            "recommendation_df": None,
+
+            "rejected_df":None,
+
+            "summary": None,
+
+            "curve": None,
+
+            "follow_up": None
+
+        }
+
 
     elif tool == "dcr":
 
-        return "DCR tool not yet connected."
+        return {
+
+            "response": "DCR tool not yet connected.",
+
+            "recommendation_df": None,
+
+            "rejected_df":None,
+
+            "summary": None,
+
+            "curve": None,
+
+            "follow_up": None
+
+        }
+
 
     elif tool == "krd":
 
-        return "KRD tool not yet connected."
+        return {
+
+            "response": "KRD tool not yet connected.",
+
+            "recommendation_df": None,
+
+            "rejected_df":None,
+
+            "summary": None,
+
+            "curve": None,
+
+            "follow_up": None
+
+        }
 
     else:
 
@@ -255,8 +501,33 @@ def ask_arjuna(user_query):
             """
         )
 
-        return response.text
+        return {
 
-question = input("Ask Arjuna AI: ")
+            "response": response.text,
 
-print(ask_arjuna(question))
+            "recommendation_df": None,
+
+            "rejected_df":None,
+
+            "summary": None,
+
+            "curve": None,
+
+            "follow_up": None
+
+        }
+
+#question = input("Ask Arjuna AI: ")
+
+#print(ask_arjuna(question))
+if __name__ == "__main__":    
+    while True:
+
+        question = input("\nAsk Arjuna AI: ")
+
+        if question.lower() == "exit":
+            break
+
+        response = ask_arjuna(question)
+
+        print(response)
