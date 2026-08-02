@@ -1,4 +1,5 @@
 import os
+import json
 from google import genai
 
 from engine.excel_reader import ALMData
@@ -93,8 +94,7 @@ def run_recommendation(curve_name):
     return recommendation_df, rejected_df, message
 
 
-
-def explain_recommendation(curve_name):
+def explain_recommendation(curve_name,user_query):
 
     recommendation_df, rejected_df, message = run_recommendation(curve_name)
 
@@ -120,15 +120,13 @@ def explain_recommendation(curve_name):
 
         {top_strategy}
 
-        Explain:
+        If the user asks:
+        - Which bond should I sell? → Tell only the sell bond.
+        - Which bond should I buy? → Tell only the purchase bond.
+        - What is the MTM gain? → Tell only the MTM gain.
+        - Ask for a recommendation? → Explain the complete strategy.
 
-        1. Why this recommendation was selected.
-        2. What bond should be sold.
-        3. What bond should be purchased.
-        4. Expected realised MTM gain.
-        5. Expected DCR improvement.
-
-        Do not invent any values. Use only the supplied data.
+        Never invent values. Use only the supplied data.
         """
 
     response = client.models.generate_content(
@@ -138,6 +136,127 @@ def explain_recommendation(curve_name):
 
     return response.text
 
-if __name__ == "__main__":
 
-    print(explain_recommendation("today"))
+def identify_tool(user_query):
+
+    prompt = f"""
+    Your job is to identify:
+
+    1. Which tool should be called.
+    2. Which yield curve should be used.
+
+    Available tools:
+
+    1. recommendation
+    - portfolio switching
+    - bond switching
+    - rebalance
+    - optimization
+    - DCR improvement
+    - sell and buy bonds
+
+    2. pricing
+    - market value
+    - valuation
+    - present value
+    - price
+    - valuation of bonds
+
+    3. dcr
+    - DCR
+    - duration gap
+    - duration matching
+
+    4. krd
+    - key rate duration
+    - KRD
+    - bucket duration
+
+    5. general
+    - greetings
+    - actuarial concepts
+    - finance concepts
+    - anything else
+
+    Available curves:
+
+    - today's
+    - yesterday's
+    - day before yesterday's
+
+    Rules:
+
+    1. If the user mentions today's → return "today".
+    2. If the user mentions yesterday's → return "yesterday".
+    3. If the user mentions day before yesterday's → return "day before yesterday".
+    4. If no curve is mentioned, return "today".
+    5. Do not invent any other curve names.
+
+    Return ONLY valid JSON.
+
+    Example:
+
+    {{
+        "tool": "recommendation",
+        "curve": "today"
+    }}
+
+    User Question:
+
+    {user_query}
+    """
+
+    response = client.models.generate_content(
+        model="gemini-3.1-flash-lite",
+        contents=prompt
+    )
+
+    return json.loads(response.text)
+
+
+def ask_arjuna(user_query):
+
+    intent = identify_tool(user_query)
+
+    tool = intent["tool"]
+
+    curve = intent["curve"]
+
+    print(f"Tool Selected: {tool}")
+
+    if tool == "recommendation":
+
+        return explain_recommendation(curve, user_query)
+
+    elif tool == "pricing":
+
+        return "Pricing tool not yet connected."
+
+    elif tool == "dcr":
+
+        return "DCR tool not yet connected."
+
+    elif tool == "krd":
+
+        return "KRD tool not yet connected."
+
+    else:
+
+        response = client.models.generate_content(
+            model="gemini-3.1-flash-lite",
+            contents=f"""
+            You are Arjuna AI.
+
+            Respond in the context of Asset-Liability Management (ALM), actuarial science, Investments and Finance.
+
+            User Question:
+
+            {user_query}
+            """
+        )
+
+        return response.text
+
+question = input("Ask Arjuna AI: ")
+
+print(ask_arjuna(question))
