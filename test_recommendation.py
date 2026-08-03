@@ -170,9 +170,7 @@ def explain_recommendation(curve_name,user_query):
     response = client.models.generate_content(
         model="gemini-3.1-flash-lite",
         contents=f"""{SYSTEM_PROMPT}
-
-    User Question:
-    {user_query}
+        {prompt}
     """
     )
 
@@ -395,9 +393,7 @@ def explain_followup(user_query):
     response = client.models.generate_content(
         model="gemini-3.1-flash-lite",
         contents=f"""{SYSTEM_PROMPT}
-
-    User Question:
-    {user_query}
+        {prompt}
     """
     )
 
