@@ -215,7 +215,7 @@ def identify_tool(user_query):
     - valuation of bonds
 
     3. dcr
-    - DCR
+    - Duration Coverage Ratio (DCR)
     - duration gap
     - duration matching
 
@@ -247,6 +247,7 @@ def identify_tool(user_query):
     "why this strategy", "show details", "its KRD"),
     still return tool = "recommendation".
     6. Do not invent any other curve names.
+    7. Do not define any acronym on your own.
 
     If the user is asking about the previous answer, for example:
 
