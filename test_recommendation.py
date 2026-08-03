@@ -12,6 +12,7 @@ from engine.dcr import calculate_dcr
 from engine.krd import calculate_bond_krd
 from engine.recommendation import generate_recommendations
 from conversation_state import conversation_state
+from engine.system_prompt import SYSTEM_PROMPT
 
 client = genai.Client(
     api_key=os.getenv("GEMINI_API_KEY")
@@ -167,8 +168,12 @@ def explain_recommendation(curve_name,user_query):
         """
 
     response = client.models.generate_content(
-        model="gemini-3.1-flash-lite",
-        contents=prompt
+        model="gemini-2.5-flash",
+        contents=f"""{SYSTEM_PROMPT}
+
+    User Question:
+    {user_query}
+    """
     )
 
     return {
@@ -388,8 +393,12 @@ def explain_followup(user_query):
     """
 
     response = client.models.generate_content(
-        model="gemini-3.1-flash-lite",
-        contents=prompt
+        model="gemini-2.5-flash",
+        contents=f"""{SYSTEM_PROMPT}
+
+    User Question:
+    {user_query}
+    """
     )
 
     return {
