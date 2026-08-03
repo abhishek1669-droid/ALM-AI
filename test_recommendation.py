@@ -248,6 +248,7 @@ def identify_tool(user_query):
     still return tool = "recommendation".
     6. Do not invent any other curve names.
     7. Do not define any acronym on your own.
+    8. Strictly define DCR as Duration Coverage Ratio and KRD as Key Rate Duration.
 
     If the user is asking about the previous answer, for example:
 
