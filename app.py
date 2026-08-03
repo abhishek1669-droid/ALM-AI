@@ -7,7 +7,7 @@ st.set_page_config(
 )
 
 st.title("🏹 Arjuna AI")
-st.caption("AI Copilot for Asset Liability Management")
+st.caption("AI Assistant for Asset Liability Management - Rebalancing Opportunities")
 
 st.divider()
 
